@@ -3,6 +3,7 @@ const { cp } = require('fs/promises');
 const fs = require('fs/promises');
 const path = require('path');
 const objectHasOwnPolyfill = require.resolve('core-js/actual/object/has-own');
+
 const replaceOpenApiIsNode = {
     name: 'replace-open-api-is-node',
     setup(build) {
@@ -25,6 +26,7 @@ const replaceOpenApiIsNode = {
         );
     },
 };
+
 !(async () => {
     const artifacts = [{ src: 'src/worker.js', dest: 'dist/_worker.js' }];
     for (const artifact of artifacts) {
@@ -38,9 +40,24 @@ const replaceOpenApiIsNode = {
             outfile: artifact.dest,
             inject: [objectHasOwnPolyfill],
             plugins: [replaceOpenApiIsNode],
+            // 👇 解决 Could not resolve 报错，将 Node 内置库排除在 Worker 打包外
+            external: [
+                'child_process',
+                'dgram',
+                'fs',
+                'net',
+                'stream/promises',
+                'cron',
+                'node:*',
+            ],
+            // 👇 消除 direct-eval 警告日志
+            logOverride: {
+                'direct-eval': 'silent',
+            },
         });
         console.log(`✔️ 打包完成: ${artifact.src} → ${artifact.dest}`);
     }
+
     const verfacts = [{ src: 'src/vercel.js', dest: 'src/server.js' }];
     for (const artifact of verfacts) {
         await build({
@@ -53,9 +70,13 @@ const replaceOpenApiIsNode = {
             outfile: artifact.dest,
             inject: [objectHasOwnPolyfill],
             plugins: [replaceOpenApiIsNode],
+            logOverride: {
+                'direct-eval': 'silent',
+            },
         });
         console.log(`✔️ 打包完成: ${artifact.src} → ${artifact.dest}`);
     }
+
     const copyTasks = [
         ['./template', './dist/template'],
         ['./favicon.png', './dist/favicon.png'],
