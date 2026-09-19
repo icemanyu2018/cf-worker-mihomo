@@ -2,7 +2,19 @@ const { build } = require('esbuild');
 const { cp } = require('fs/promises');
 const fs = require('fs/promises');
 const path = require('path');
+const { builtinModules } = require('module');
 const objectHasOwnPolyfill = require.resolve('core-js/actual/object/has-own');
+
+// 收集所有 Node.js 原生内置模块（包括带 node: 前缀和子路径，如 fs、fs/promises、node:tls 等）
+const nodeBuiltins = [
+    ...builtinModules,
+    ...builtinModules.map((m) => `node:${m}`),
+    'stream/promises',
+    'stream/web',
+    'fs/promises',
+    'cron',
+    'node:*',
+];
 
 const replaceOpenApiIsNode = {
     name: 'replace-open-api-is-node',
@@ -40,17 +52,9 @@ const replaceOpenApiIsNode = {
             outfile: artifact.dest,
             inject: [objectHasOwnPolyfill],
             plugins: [replaceOpenApiIsNode],
-            // 👇 解决 Could not resolve 报错，将 Node 内置库排除在 Worker 打包外
-            external: [
-                'child_process',
-                'dgram',
-                'fs',
-                'net',
-                'stream/promises',
-                'cron',
-                'node:*',
-            ],
-            // 👇 消除 direct-eval 警告日志
+            // 排除所有 Node 内置模块（包含 tls、net、fs、child_process 等）
+            external: nodeBuiltins,
+            // 消除 direct-eval 警告日志
             logOverride: {
                 'direct-eval': 'silent',
             },
