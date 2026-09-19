@@ -127,3 +127,9 @@ jobs:
                   git commit -m "release: ${{ steps.tag.outputs.release_tag }}"
                   git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
                   git push -f -u origin release
+             - name: Deploy to Cloudflare Workers
+              uses: cloudflare/wrangler-action@v3
+              with:
+                  apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+                  accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+                  command: deploy dist/_worker.js --name cf-subcloud     
