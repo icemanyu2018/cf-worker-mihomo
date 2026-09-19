@@ -3,6 +3,11 @@ name = "cf-subcloud"
 main = "dist/_worker.js"
 compatibility_date = "2026-07-09"
 compatibility_flags = ["nodejs_compat"]
+
 [assets]
 directory = "./template"
 binding = "ASSETS"
+
+# 追加自定义环境变量
+[vars]
+IMG = "https://www.loliapi.com/acg/"
