@@ -1,6 +1,135 @@
 name: SubCloud
 
 on:
+  push:
+    tags:
+      - 'v*'
+  schedule:
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: 'main'
+          submodules: recursive
+          fetch-depth: '0'
+          fetch-tags: 'true'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Check and update submodules
+        id: check_submodules
+        run: |
+          git submodule status --recursive > submodules_before.txt
+          git submodule update --remote --recursive
+          git submodule status --recursive > submodules_after.txt
+
+          if ! diff submodules_before.txt submodules_after.txt > /dev/null; then
+            echo "Submodules have been updated"
+            echo "has_updates=true" >> $GITHUB_OUTPUT
+
+            echo "Submodule changes:"
+            diff submodules_before.txt submodules_after.txt || true
+          else
+            echo "No submodule updates"
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+          fi
+          rm -f submodules_before.txt submodules_after.txt
+
+      - name: Update package version if submodules changed
+        id: update
+        if: steps.check_submodules.outputs.has_updates == 'true' && github.event_name != 'push'
+        run: |
+          pnpm version patch --no-git-tag-version
+          pnpm install --no-frozen-lockfile
+          pnpm build
+          TAG="v$(node -p "require('./package.json').version")"
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add package.json pnpm-lock.yaml
+          git add src/core/Sub-Store
+          git add src/server.js
+          git commit -m "chore: 同步 Sub-store 至 V$(node -p "require('./src/core/Sub-Store/backend/package.json').version")"
+
+          git push origin main
+          git tag "$TAG"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        if: steps.update.outputs.pushed != 'true'
+        run: |
+          pnpm install --no-frozen-lockfile
+
+      - name: Bundle
+        if: steps.update.outputs.pushed != 'true'
+        run: |
+          pnpm build
+
+      - name: Generate release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            echo "release_tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            SUBSTORE_RELEASE="v$(node --eval="process.stdout.write(require('./package.json').version)")"
+            echo "release_tag=$SUBSTORE_RELEASE" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate release notes
+        run: |
+          bash .github/release.sh
+
+      - name: Release
+        if: steps.update.outputs.pushed == 'true' || github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          body_path: release.md
+          generate_release_notes: false
+          files: |
+            ./dist/_worker.js
+
+      - name: Git push assets to "release" branch
+        run: |
+          cd dist || exit 1
+          git init
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b release
+          git add .
+          git commit -m "release: ${{ steps.tag.outputs.release_tag }}"
+          git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
+          git push -f -u origin release
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy dist/_worker.js --name cf-subcloudname: SubCloud
+
+on:
     push:
         tags:
             - 'v*'
